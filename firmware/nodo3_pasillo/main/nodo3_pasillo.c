@@ -105,8 +105,8 @@ static const char *TAG = "nodo3_pasillo";
 #define MAX_AGE_SEG             60
 #define VENTANA_FILTRO          8
 
-/* --- Patron de parpadeo de la baliza (ms) --- */
-#define BALIZA_PARPADEO_MS      400
+/* --- Patron de parpadeo de la baliza (ms). Ritmo rapido de emergencia. --- */
+#define BALIZA_PARPADEO_MS      150
 
 /* ============================================================================
  *  ESTADO GLOBAL
