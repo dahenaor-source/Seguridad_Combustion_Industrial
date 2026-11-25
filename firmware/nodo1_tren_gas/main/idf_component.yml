@@ -1,5 +1,6 @@
 # Dependencias gestionadas por el IDF Component Manager.
-# TinyCBOR provee el encabezado "cbor.h" usado para serializar /env/air.
+# El componente "espressif/cbor" empaqueta TinyCBOR y expone el header "cbor.h"
+# usado para serializar /env/air. (El nombre "tinycbor" no existe en el registro.)
 dependencies:
   idf: ">=5.1"
-  espressif/tinycbor: "~0.6.0"
+  espressif/cbor: "^0.6.0"
