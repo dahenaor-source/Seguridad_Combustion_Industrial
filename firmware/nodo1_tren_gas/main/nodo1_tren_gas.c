@@ -31,6 +31,8 @@
 #include <string.h>
 #include <inttypes.h>
 
+#include <math.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -46,15 +48,47 @@
 #include "esp_openthread.h"
 #include "esp_openthread_types.h"
 #include "esp_openthread_netif_glue.h"
+#include "esp_vfs_eventfd.h"
 #include "esp_netif.h"
 #include "openthread/thread.h"
 #include "openthread/coap.h"
 #include "openthread/ip6.h"
+#include "openthread/instance.h"
+#include "openthread/tasklet.h"
 
-/* ----- Serializacion CBOR (componente TinyCBOR de ESP-IDF) ----- */
+/* ----- Serializacion CBOR (componente espressif/cbor = TinyCBOR) ----- */
 #include "cbor.h"
 
 static const char *TAG = "nodo1_tren_gas";
+
+/* ----------------------------------------------------------------------------
+ *  Macros de configuracion por defecto de OpenThread.
+ *  En los ejemplos de ESP-IDF estas macros viven en "esp_ot_config.h" (un
+ *  header propio del ejemplo, no instalado). Las definimos aqui con los mismos
+ *  valores estandar para no depender de ese archivo.
+ * ------------------------------------------------------------------------- */
+#ifndef ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG
+#define ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG()                    \
+    {                                                            \
+        .radio_mode = RADIO_MODE_NATIVE,                         \
+    }
+#endif
+
+#ifndef ESP_OPENTHREAD_DEFAULT_HOST_CONFIG
+#define ESP_OPENTHREAD_DEFAULT_HOST_CONFIG()                     \
+    {                                                            \
+        .host_connection_mode = HOST_CONNECTION_MODE_NONE,       \
+    }
+#endif
+
+#ifndef ESP_OPENTHREAD_DEFAULT_PORT_CONFIG
+#define ESP_OPENTHREAD_DEFAULT_PORT_CONFIG()                     \
+    {                                                            \
+        .storage_partition_name = "nvs",                         \
+        .netif_queue_size = 10,                                  \
+        .task_queue_size = 10,                                   \
+    }
+#endif
 
 /* ============================================================================
  *  CONFIGURACION DE HARDWARE Y UMBRALES
@@ -372,7 +406,7 @@ static void act_cutoff_handler(void *ctx, otMessage *msg, const otMessageInfo *i
         resp_code = OT_COAP_CODE_BAD_REQUEST;    /* 4.00 */
     }
 
-    if (otCoapMessageIsConfirmable(msg)) {
+    if (otCoapMessageGetType(msg) == OT_COAP_TYPE_CONFIRMABLE) {
         otMessage *resp = otCoapNewMessage(ot, NULL);
         if (resp) {
             otCoapMessageInitResponse(resp, msg, OT_COAP_TYPE_ACKNOWLEDGMENT, resp_code);
@@ -425,16 +459,16 @@ static void tarea_sensor(void *arg)
         /* Logica local de respaldo (por si no hay central). */
         aplicar_logica_local();
 
-        /* Notificar por Observe si cambio significativamente o toca latido. */
+        /* Marca de cambio significativo o latido periodico.
+         * NOTA: el servidor CoAP de OpenThread no reenvia Observe de forma
+         * automatica. En esta etapa la central lee /env/air por peticion GET
+         * (polling). Cuando integremos la central decidiremos si el nodo
+         * publica como cliente CoAP o si se implementa Observe completo. */
         bool cambio    = (gas_prev < -999.0f) || (fabsf(gas - gas_prev) >= 2.0f);
         bool es_latido = (xTaskGetTickCount() - ultimo_latido)
                          >= pdMS_TO_TICKS(PERIODO_LATIDO_MS);
 
         if (cambio || es_latido || s_sensor_falla) {
-            otInstance *ot = esp_openthread_get_instance();
-            if (ot) {
-                otCoapResourceUpdateObservers(ot, &s_recurso_env);
-            }
             gas_prev = gas;
             if (es_latido) ultimo_latido = xTaskGetTickCount();
             ESP_LOGI(TAG, "gas=%.1f%% valvula=%s falla=%d",
@@ -459,7 +493,19 @@ static void tarea_openthread(void *arg)
         .port_config  = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
     };
 
+    /* El driver OpenThread de ESP-IDF usa eventfd para notificar tareas. */
+    esp_vfs_eventfd_config_t eventfd_cfg = {
+        .max_fds = 3,
+    };
+    ESP_ERROR_CHECK(esp_vfs_eventfd_register(&eventfd_cfg));
+
     ESP_ERROR_CHECK(esp_openthread_init(&config));
+
+    /* Crear e instalar la interfaz de red (netif) de OpenThread. */
+    esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_OPENTHREAD();
+    esp_netif_t *netif = esp_netif_new(&netif_cfg);
+    assert(netif != NULL);
+    ESP_ERROR_CHECK(esp_netif_attach(netif, esp_openthread_netif_glue_init(&config)));
 
     otInstance *ot = esp_openthread_get_instance();
 
@@ -477,6 +523,8 @@ static void tarea_openthread(void *arg)
     esp_openthread_launch_mainloop();
 
     /* Si el mainloop retorna, limpiar. */
+    esp_netif_destroy(netif);
+    esp_openthread_netif_glue_deinit();
     esp_openthread_deinit();
     vTaskDelete(NULL);
 }
