@@ -38,9 +38,7 @@ Alimentación: 12 VDC regulada localmente a 5 V (L7805). El MQ-6 trabaja a 5 V.
 
 ---
 
-## Diagrama de conexiones
-
-![Diagrama de conexiones del Nodo 1](docs/conexiones_nodo1.png)
+## Conexiones
 
 ### Tabla de cableado (paso a paso)
 
@@ -68,8 +66,6 @@ Conecta cada punto respetando el color de cable recomendado:
 > (que puede llegar a ~5 V) **nunca** se conecta directa al GPIO2: siempre pasa por el divisor.
 
 ### Detalle del divisor de tensión
-
-![Divisor de tensión 5V a 3.3V](docs/divisor_tension.png)
 
 El divisor reduce la salida de 5 V del sensor a un máximo seguro de ~3.0 V para el ADC:
 
