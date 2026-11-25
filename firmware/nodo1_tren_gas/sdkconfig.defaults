@@ -1,0 +1,31 @@
+# ============================================================================
+#  Configuracion por defecto del Nodo 1 (ESP32-C6 + OpenThread)
+#  Se aplica al ejecutar `idf.py set-target esp32c6 && idf.py build`.
+# ============================================================================
+
+# --- Objetivo ---
+CONFIG_IDF_TARGET="esp32c6"
+
+# --- OpenThread (dispositivo FTD: Full Thread Device, actua como Router) ---
+CONFIG_OPENTHREAD_ENABLED=y
+CONFIG_OPENTHREAD_FTD=y
+CONFIG_OPENTHREAD_CLI=n
+CONFIG_OPENTHREAD_RADIO_NATIVE=y
+
+# Canal 25 y PAN por defecto (la central puede recomisionar via Bring-up).
+CONFIG_OPENTHREAD_NETWORK_CHANNEL=25
+
+# --- CoAP sobre OpenThread ---
+CONFIG_OPENTHREAD_COAP=y
+
+# --- Radio IEEE 802.15.4 nativa del ESP32-C6 ---
+CONFIG_IEEE802154_ENABLED=y
+
+# --- Log ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# --- Pila de red lwIP con IPv6 (requerido por Thread/6LoWPAN) ---
+CONFIG_LWIP_IPV6=y
+
+# --- Ajuste de memoria para dejar holgura al stack Thread ---
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
