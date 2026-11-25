@@ -38,6 +38,51 @@ Alimentación: 12 VDC regulada localmente a 5 V (L7805). El MQ-6 trabaja a 5 V.
 
 ---
 
+## Diagrama de conexiones
+
+![Diagrama de conexiones del Nodo 1](docs/conexiones_nodo1.png)
+
+### Tabla de cableado (paso a paso)
+
+Conecta cada punto respetando el color de cable recomendado:
+
+| # | Desde | Hacia | Cable | Notas |
+|---|-------|-------|-------|-------|
+| 1 | Fuente **+5V** | MQ-6 **VCC** | Rojo | El MQ-6 se alimenta a 5 V (su calefactor interno) |
+| 2 | Fuente **+5V** | Relé **VCC** | Rojo | El módulo relé es de 5 V |
+| 3 | Fuente **GND** | GND común (MQ-6, ESP32, relé, válvula) | Negro | **Tierra común obligatoria** entre todo |
+| 4 | MQ-6 **AO** | **R1 (10 kΩ)** → nodo central del divisor | Azul | Señal analógica del sensor |
+| 5 | Nodo central del divisor | ESP32-C6 **GPIO2** (ADC1_CH2) | Azul | Entra la tensión ya reducida a ≤ 3.0 V |
+| 6 | **R2 (15 kΩ)** | GND común | Negro | Rama inferior del divisor |
+| 7 | ESP32-C6 **GPIO4** | Relé **IN** | Verde | Control del relé (disparo en LOW) |
+| 8 | ESP32-C6 **GND** | GND común | Negro | Referencia de la lógica |
+| 9 | Fuente **+12V** | Relé **COM** | Rojo | Alimenta la carga de la electroválvula |
+| 10 | Relé **NA** | Electroválvula **(+)** | Rojo | Al cerrar el relé, energiza la válvula (la abre) |
+| 11 | Electroválvula **(−)** | GND común | Negro | Retorno de la válvula |
+
+> ⚠️ **Lo más importante:** todos los dispositivos deben compartir la **misma tierra (GND)**.
+> Si la ESP32-C6 y la fuente de 12 V no comparten GND, el ADC medirá valores erráticos y el
+> relé puede no conmutar.
+
+> La ESP32-C6 trabaja a **3.3 V** y su ADC **no tolera 5 V**. Por eso la salida `AO` del MQ-6
+> (que puede llegar a ~5 V) **nunca** se conecta directa al GPIO2: siempre pasa por el divisor.
+
+### Detalle del divisor de tensión
+
+![Divisor de tensión 5V a 3.3V](docs/divisor_tension.png)
+
+El divisor reduce la salida de 5 V del sensor a un máximo seguro de ~3.0 V para el ADC:
+
+```
+Vout = Vin × R2 / (R1 + R2) = 5.0 × 15 / (10 + 15) = 3.0 V
+```
+
+- **R1 = 10 kΩ** en serie (entre `AO` del MQ-6 y el nodo de salida).
+- **R2 = 15 kΩ** del nodo de salida a GND.
+- El **nodo central** (unión de R1 y R2) es el que va a **GPIO2**.
+
+---
+
 ## Recursos CoAP
 
 | Recurso | Método | Payload CBOR | Descripción |
@@ -104,7 +149,25 @@ IPv6 y Canal 25.
 
 ---
 
-## Estado
+## Notas de puesta en marcha
 
-Primer nodo en fase de montaje/soldadura. El firmware está listo para compilar; los umbrales
-se ajustarán con la calibración del MQ-6 en banco.
+- **Sin el MQ-6 conectado**, el pin GPIO2 queda flotante y el valor `gas=` del log es solo
+  **ruido eléctrico** (no es una medición real). Es normal; al conectar el sensor pasará a
+  reflejar la lectura verdadera. También puede aparecer `falla=1` de forma intermitente sin
+  el sensor, por la misma razón.
+- El **MQ-6 requiere precalentamiento** (su calefactor interno tarda en estabilizarse). Deja
+  el sensor energizado unos minutos antes de calibrar.
+- La válvula aparece siempre **CERRADA** al arrancar: es el comportamiento seguro buscado.
+  La apertura solo ocurre por orden explícita de la central (`PUT /act/cutoff` con `v=0`), que
+  se implementará con el demonio de la BeaglePlay.
+
+## Estado de validación
+
+- [x] La placa arranca y ejecuta el firmware (sin panic).
+- [x] Arranque seguro: válvula cerrada al inicio.
+- [x] Radio Thread activa en Canal 25.
+- [x] Servidor CoAP activo (`/env/air`, `/act/cutoff`).
+- [x] Bucle de muestreo del sensor en ejecución.
+- [ ] Validación con el MQ-6 físico conectado (pendiente de soldadura).
+- [ ] Validación del relé + electroválvula.
+- [ ] Calibración del umbral a ppm reales.
