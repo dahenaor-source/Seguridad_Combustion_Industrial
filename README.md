@@ -45,7 +45,7 @@ autónoma aunque se apague la central.
 firmware/
   nodo1_tren_gas/     ← Nodo 1: corte de gas (ESP-IDF, ESP32-C6)
   nodo2_horno/        ← Nodo 2: CO + BME680 + extractor (ESP-IDF, ESP32-C6)
-  nodo3_pasillo/      ← Nodo 3: baliza (pendiente)
+  nodo3_pasillo/      ← Nodo 3: CO + buzzer + baliza LED (ESP-IDF, ESP32-C6)
 docs/                 ← requerimientos y matriz de verificación
 ```
 
@@ -55,7 +55,7 @@ docs/                 ← requerimientos y matriz de verificación
 
 - [x] **Nodo 1 — Tren de Gas** (firmware ESP-IDF, validado en placa) → [`firmware/nodo1_tren_gas/`](firmware/nodo1_tren_gas/)
 - [x] **Nodo 2 — Horno / Chimenea** (firmware ESP-IDF listo para compilar) → [`firmware/nodo2_horno/`](firmware/nodo2_horno/)
-- [ ] Nodo 3 — Pasillo / Baliza
+- [x] **Nodo 3 — Pasillo / Baliza** (firmware ESP-IDF listo para compilar) → [`firmware/nodo3_pasillo/`](firmware/nodo3_pasillo/)
 - [ ] Demonio central (BeaglePlay, C++17)
 
 Documentación: ver [`docs/REQUERIMIENTOS.md`](docs/REQUERIMIENTOS.md) y

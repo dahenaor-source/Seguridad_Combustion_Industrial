@@ -1,0 +1,5 @@
+# Dependencias gestionadas por el IDF Component Manager.
+# El componente "espressif/cbor" (TinyCBOR) expone el header "cbor.h".
+dependencies:
+  idf: ">=5.1"
+  espressif/cbor: "^0.6.0"
