@@ -37,6 +37,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_event.h"
 #include "nvs_flash.h"
 
 #include "driver/gpio.h"
@@ -537,6 +538,12 @@ void app_main(void)
     ESP_LOGI(TAG, "=== NODO 1 - Tren de Gas y Corte de Suministro ===");
 
     ESP_ERROR_CHECK(nvs_flash_init());
+
+    /* Infraestructura de red: pila netif + bucle de eventos del sistema.
+     * El driver de OpenThread registra sus manejadores en este event loop;
+     * si no existe, esp_netif_attach falla con ESP_ERR_INVALID_STATE (259). */
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     /* Hardware local primero: dejar la valvula en estado seguro (cerrada). */
     rele_init();

@@ -8,5 +8,6 @@ idf_component_register(
         nvs_flash
         openthread
         esp_netif
+        esp_event
         vfs
 )
