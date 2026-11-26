@@ -111,9 +111,14 @@ pierde el enlace (autonomía, RF-07):
 Umbrales de arranque (se calibran en campo), en `nodo1_tren_gas.c`:
 
 ```c
-#define UMBRAL_GAS_ALERTA   45.0f   // aviso temprano
-#define UMBRAL_GAS_CORTE    60.0f   // corte inmediato (cercanía al LEL)
+#define UMBRAL_GAS_ALERTA   28.0f   // aviso temprano (sobre el ruido de reposo)
+#define UMBRAL_GAS_CORTE    35.0f   // corte (calibrado al MQ-6 real del montaje)
 ```
+
+> Valores calibrados en banco para el MQ-6 usado: en reposo lee ~10-25% y con
+> una fuente de gas (encendedor sin chispa) supera el 30%. Para un producto final
+> se calibrarían a ppm reales. Además, un pico de ruido aislado ya **no** marca
+> falla: se exigen 3 lecturas implausibles seguidas (filtro antifalsas alarmas).
 
 ---
 

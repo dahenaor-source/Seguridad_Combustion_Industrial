@@ -109,8 +109,8 @@ static const char *TAG = "nodo1_tren_gas";
 /* --- Umbrales (valores en "cuentas" relativas 0..100 del gas combustible).
  *  Se calibran en campo; aqui se dejan valores de arranque conservadores.
  *  El valor reportado "gas_pct" es un indice de concentracion normalizado.      --- */
-#define UMBRAL_GAS_ALERTA       45.0f      /* aviso temprano                        */
-#define UMBRAL_GAS_CORTE        60.0f      /* corte inmediato de la valvula (LEL)   */
+#define UMBRAL_GAS_ALERTA       28.0f      /* aviso temprano (sobre el ruido de reposo) */
+#define UMBRAL_GAS_CORTE        35.0f      /* corte de la valvula (calibrado al MQ-6 real) */
 
 /* --- Telemetria --- */
 #define PERIODO_MUESTREO_MS     1000       /* lectura del sensor cada 1 s           */
@@ -140,6 +140,14 @@ static bool                      s_ventana_llena = false;
 static volatile float            s_gas_pct = 0.0f;      /* ultimo indice de gas  */
 static volatile bool             s_sensor_falla = false;/* plausibilidad (5.03)  */
 static volatile estado_valvula_t s_estado = VALVULA_ABIERTA;
+
+/* Contador de lecturas implausibles consecutivas. Solo se declara falla
+ * cuando se acumulan >= FALLA_LECTURAS_MIN seguidas, para que un pico de ruido
+ * aislado no dispare la alarma de sonda. */
+static int                       s_cuenta_implausible = 0;
+#define FALLA_LECTURAS_MIN       3
+#define MV_MAX_VALIDO            3250   /* tope de plausibilidad (tolera picos)  */
+#define MV_MIN_VALIDO            50
 
 static otCoapResource            s_recurso_cutoff;      /* /act/cutoff           */
 static otCoapResource            s_recurso_env;         /* /env/air (GET+Observe)*/
@@ -230,7 +238,8 @@ static float leer_gas(void)
 {
     int raw = 0;
     if (adc_oneshot_read(s_adc_handle, MQ6_ADC_CHANNEL, &raw) != ESP_OK) {
-        s_sensor_falla = true;
+        s_cuenta_implausible++;
+        if (s_cuenta_implausible >= FALLA_LECTURAS_MIN) s_sensor_falla = true;
         return s_gas_pct;
     }
 
@@ -240,13 +249,23 @@ static float leer_gas(void)
     }
 
     /* Plausibilidad: el divisor entrega ~0.1..3.0 V en operacion valida.
-     * < 50 mV  -> sonda desconectada / sin alimentacion del calefactor.
-     * > 3150 mV-> saturacion / cortocircuito.                                   */
-    if (mv < 50 || mv > 3150) {
-        s_sensor_falla = true;
-        ESP_LOGW(TAG, "MQ-6 implausible (%d mV) -> posible sonda desconectada", mv);
-        return s_gas_pct;
+     * < 50 mV   -> sonda desconectada / sin alimentacion del calefactor.
+     * > 3250 mV -> saturacion / cortocircuito.
+     * Un pico aislado NO marca falla: se exigen FALLA_LECTURAS_MIN seguidas.    */
+    if (mv < MV_MIN_VALIDO || mv > MV_MAX_VALIDO) {
+        s_cuenta_implausible++;
+        if (s_cuenta_implausible >= FALLA_LECTURAS_MIN) {
+            if (!s_sensor_falla) {
+                ESP_LOGW(TAG, "MQ-6 implausible (%d mV) x%d -> sonda desconectada",
+                         mv, s_cuenta_implausible);
+            }
+            s_sensor_falla = true;
+        }
+        return s_gas_pct;   /* mantener el ultimo valor valido */
     }
+
+    /* Lectura valida: reiniciar el contador y limpiar la falla. */
+    s_cuenta_implausible = 0;
     s_sensor_falla = false;
 
     /* Normaliza 0..3000 mV -> 0..100 (indice de concentracion). */
