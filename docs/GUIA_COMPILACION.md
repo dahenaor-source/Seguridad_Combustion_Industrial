@@ -84,7 +84,7 @@ idf.py -p /dev/ttyACM0 flash monitor
 | `espressif/tinycbor doesn't match` | Dependencia mal nombrada; el correcto es `espressif/cbor` (ya corregido en el repo) |
 | Error de red/panic al arrancar | Falta `esp_netif_init` + `esp_event_loop_create_default` (ya incluidos) |
 | Arranque "sucio" (reusa config vieja) | Borrar la flash: `idf.py -p /dev/ttyACM0 erase-flash` y volver a flashear |
-| `BME680 no responde` | Normal si el sensor no está conectado; el Nodo 2 continúa solo con CO |
+| `BMP180 no responde` | Normal si el sensor no está conectado; el Nodo 2 continúa solo con CO |
 | Lecturas de gas sin sentido | Normal si el sensor MQ no está conectado (pin flotante = ruido) |
 
 ---

@@ -8,7 +8,7 @@
  * ----------------------------------------------------------------------------
  *  Funcion:
  *    - Mide monoxido de carbono (CO) con un sensor MQ-7 (analogico, ADC).
- *    - Mide temperatura, humedad y presion con un BME680 por bus I2C.
+ *    - Mide temperatura con un BMP180 (GY-68) por bus I2C (no mide humedad).
  *    - Publica telemetria por CoAP en  /env/air  (payload CBOR < 52 B).
  *    - Expone el recurso de actuacion   /act/extractor (PUT CON idempotente).
  *    - Controla un rele que enciende el ventilador EXTRACTOR de aire.
@@ -22,10 +22,10 @@
  *    El extractor se apaga automaticamente cuando el aire vuelve a ser seguro.
  *
  *  MAPA DE PINES (segun especificacion del proyecto):
- *    - MQ-7  AO  -> GPIO3  (ADC1_CH3)   [salida 5V por divisor 10k+15k -> <=3.0 V]
- *    - BME680 SDA-> GPIO6  (I2C, 3.3 V)
- *    - BME680 SCL-> GPIO7  (I2C, 3.3 V)
- *    - Rele  IN  -> GPIO5  (disparo en LOW / Low Level Trigger)
+ *    - MQ-7   AO  -> GPIO3  (ADC1_CH3)   [salida 5V por divisor 10k+15k -> <=3.0 V]
+ *    - BMP180 SDA -> GPIO6  (I2C, 3.3 V)
+ *    - BMP180 SCL -> GPIO7  (I2C, 3.3 V)
+ *    - Rele   IN  -> GPIO5  (disparo en LOW / Low Level Trigger)
  * ============================================================================
  */
 
@@ -62,8 +62,9 @@
 /* ----- Serializacion CBOR (componente espressif/cbor = TinyCBOR) ----- */
 #include "cbor.h"
 
-/* ----- Driver BME680 de Bosch (componente boschsensortec/bme68x) ----- */
-#include "bme68x.h"
+/* NOTA: el sensor ambiental de este montaje es un BMP180 (GY-68), que mide
+ * temperatura y presion (no humedad ni VOC). El driver se implementa abajo
+ * directamente por I2C, sin componentes externos. */
 
 static const char *TAG = "nodo2_horno";
 
@@ -99,9 +100,9 @@ static const char *TAG = "nodo2_horno";
 #define MQ7_ADC_GPIO            3          /* GPIO3 = ADC1_CH3 (AO del MQ-7)      */
 #define MQ7_ADC_CHANNEL         ADC_CHANNEL_3
 #define RELE_EXTRACTOR_GPIO     5          /* GPIO5 -> IN del modulo rele         */
-#define I2C_SDA_GPIO            6          /* BME680 SDA                          */
-#define I2C_SCL_GPIO            7          /* BME680 SCL                          */
-#define BME680_I2C_ADDR         BME68X_I2C_ADDR_LOW   /* 0x76 (SDO a GND)         */
+#define I2C_SDA_GPIO            6          /* BMP180 (GY-68) SDA                  */
+#define I2C_SCL_GPIO            7          /* BMP180 (GY-68) SCL                  */
+#define BMP180_I2C_ADDR         0x77       /* direccion fija del BMP180           */
 
 /* El modulo rele dispara en LOW (Low Level Trigger):
  *   GPIO = 0 (LOW)  -> rele ENERGIZADO  -> extractor ENCENDIDO
@@ -111,7 +112,7 @@ static const char *TAG = "nodo2_horno";
 
 /* --- Umbrales (se calibran en campo).
  *  co_pct: indice de CO normalizado 0..100.
- *  temp:   grados Celsius del BME680.                                           --- */
+ *  temp:   grados Celsius del BMP180.                                           --- */
 /* Umbrales calibrados al MQ-7 real del montaje:
  *   aire limpio ~5% (35 mV), con gas sube hasta ~25% (380 mV).                  */
 #define UMBRAL_CO_ALERTA        15.0f      /* aviso temprano de CO                */
@@ -150,7 +151,7 @@ static int     s_ventana_idx = 0;
 static bool    s_ventana_llena = false;
 
 static volatile float  s_co_pct   = 0.0f;   /* indice de CO 0..100         */
-static volatile float  s_temp_c   = 0.0f;   /* temperatura BME680 (C)      */
+static volatile float  s_temp_c   = 0.0f;   /* temperatura BMP180 (C)      */
 static volatile float  s_hum_pct  = 0.0f;   /* humedad relativa (%)        */
 static volatile bool   s_sensor_falla = false;
 static volatile bool   s_bme_ok   = false;
@@ -160,12 +161,15 @@ static int             s_cuenta_implausible = 0;  /* lecturas malas seguidas */
 static otCoapResource s_recurso_ext;        /* /act/extractor */
 static otCoapResource s_recurso_env;        /* /env/air       */
 
-/* --- Handles I2C y BME680 --- */
+/* --- Handles I2C y coeficientes de calibracion del BMP180 ---
+ * El BMP180 trae 11 coeficientes de fabrica (EEPROM) que hay que leer una vez
+ * y usar en la formula de compensacion de temperatura. */
 static i2c_master_bus_handle_t  s_i2c_bus = NULL;
-static i2c_master_dev_handle_t  s_bme_dev = NULL;
-static struct bme68x_dev        s_bme;
-static struct bme68x_conf       s_bme_conf;
-static struct bme68x_heatr_conf s_bme_heatr;
+static i2c_master_dev_handle_t  s_bmp_dev = NULL;
+static struct {
+    int16_t  AC1, AC2, AC3, B1, B2, MB, MC, MD;
+    uint16_t AC4, AC5, AC6;
+} s_cal;
 
 /* ============================================================================
  *  CONTROL DEL RELE / EXTRACTOR
@@ -270,43 +274,44 @@ static float leer_co(void)
 }
 
 /* ============================================================================
- *  BME680 POR I2C (temperatura / humedad / presion)
- *  Se usa el driver oficial de Bosch (bme68x) con callbacks a I2C master.
+ *  BMP180 (GY-68) POR I2C (solo temperatura; tambien mide presion)
+ *  Driver escrito a mano por I2C master, sin componentes externos. El BMP180
+ *  NO mide humedad, por eso s_hum_pct se mantiene en 0.
  * ========================================================================== */
-static BME68X_INTF_RET_TYPE bme_i2c_read(uint8_t reg, uint8_t *data,
-                                         uint32_t len, void *intf_ptr)
+/* Oversampling del BMP180 (0=menos preciso/rapido .. 3=mas preciso/lento). */
+#define BMP180_OSS              1
+
+/* --- Helpers I2C de bajo nivel para el BMP180 --- */
+static esp_err_t bmp_write8(uint8_t reg, uint8_t val)
 {
-    (void)intf_ptr;
-    esp_err_t e = i2c_master_transmit_receive(s_bme_dev, &reg, 1, data, len,
-                                              1000 / portTICK_PERIOD_MS);
-    return (e == ESP_OK) ? BME68X_OK : BME68X_E_COM_FAIL;
+    uint8_t buf[2] = { reg, val };
+    return i2c_master_transmit(s_bmp_dev, buf, 2, 1000 / portTICK_PERIOD_MS);
 }
 
-static BME68X_INTF_RET_TYPE bme_i2c_write(uint8_t reg, const uint8_t *data,
-                                          uint32_t len, void *intf_ptr)
+static esp_err_t bmp_read(uint8_t reg, uint8_t *data, size_t len)
 {
-    (void)intf_ptr;
-    uint8_t buf[32];
-    if (len + 1 > sizeof(buf)) return BME68X_E_COM_FAIL;
-    buf[0] = reg;
-    memcpy(&buf[1], data, len);
-    esp_err_t e = i2c_master_transmit(s_bme_dev, buf, len + 1,
-                                      1000 / portTICK_PERIOD_MS);
-    return (e == ESP_OK) ? BME68X_OK : BME68X_E_COM_FAIL;
+    return i2c_master_transmit_receive(s_bmp_dev, &reg, 1, data, len,
+                                       1000 / portTICK_PERIOD_MS);
 }
 
-static void bme_delay_us(uint32_t period, void *intf_ptr)
+/* Lee un registro de 16 bits con signo (big-endian) del BMP180. */
+static int16_t bmp_read_s16(uint8_t reg)
 {
-    (void)intf_ptr;
-    if (period < 1000) {
-        esp_rom_delay_us(period);
-    } else {
-        vTaskDelay(pdMS_TO_TICKS(period / 1000));
-    }
+    uint8_t d[2] = {0};
+    bmp_read(reg, d, 2);
+    return (int16_t)((d[0] << 8) | d[1]);
 }
 
-/* Inicializa el bus I2C y el BME680. Devuelve true si el sensor respondio. */
-static bool bme680_init(void)
+static uint16_t bmp_read_u16(uint8_t reg)
+{
+    uint8_t d[2] = {0};
+    bmp_read(reg, d, 2);
+    return (uint16_t)((d[0] << 8) | d[1]);
+}
+
+/* Inicializa el bus I2C y el BMP180. Devuelve true si el sensor respondio.
+ * El BMP180 se identifica porque el registro 0xD0 (chip id) vale 0x55. */
+static bool bmp180_init(void)
 {
     i2c_master_bus_config_t bus_cfg = {
         .clk_source        = I2C_CLK_SRC_DEFAULT,
@@ -323,60 +328,59 @@ static bool bme680_init(void)
 
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address  = BME680_I2C_ADDR,
+        .device_address  = BMP180_I2C_ADDR,
         .scl_speed_hz    = 100000,
     };
-    if (i2c_master_bus_add_device(s_i2c_bus, &dev_cfg, &s_bme_dev) != ESP_OK) {
-        ESP_LOGE(TAG, "No se pudo anadir el BME680 al bus I2C");
+    if (i2c_master_bus_add_device(s_i2c_bus, &dev_cfg, &s_bmp_dev) != ESP_OK) {
+        ESP_LOGE(TAG, "No se pudo anadir el BMP180 al bus I2C");
         return false;
     }
 
-    /* Enlazar el driver Bosch con nuestros callbacks I2C. */
-    s_bme.intf     = BME68X_I2C_INTF;
-    s_bme.read     = bme_i2c_read;
-    s_bme.write    = bme_i2c_write;
-    s_bme.delay_us = bme_delay_us;
-    s_bme.amb_temp = 25;
-    s_bme.intf_ptr = NULL;
-
-    if (bme68x_init(&s_bme) != BME68X_OK) {
-        ESP_LOGW(TAG, "BME680 no responde (revisar cableado I2C)");
+    /* Verificar chip id (debe ser 0x55 en el BMP180). */
+    uint8_t chip_id = 0;
+    if (bmp_read(0xD0, &chip_id, 1) != ESP_OK || chip_id != 0x55) {
+        ESP_LOGW(TAG, "BMP180 no responde (chip_id=0x%02X, esperado 0x55) - revisar I2C",
+                 chip_id);
         return false;
     }
 
-    /* Configuracion de sobremuestreo (modo forzado, lectura puntual). */
-    s_bme_conf.filter  = BME68X_FILTER_OFF;
-    s_bme_conf.odr     = BME68X_ODR_NONE;
-    s_bme_conf.os_hum  = BME68X_OS_2X;
-    s_bme_conf.os_temp = BME68X_OS_4X;
-    s_bme_conf.os_pres = BME68X_OS_2X;
-    bme68x_set_conf(&s_bme_conf, &s_bme);
+    /* Leer los 11 coeficientes de calibracion de fabrica (registros 0xAA..0xBF). */
+    s_cal.AC1 = bmp_read_s16(0xAA);
+    s_cal.AC2 = bmp_read_s16(0xAC);
+    s_cal.AC3 = bmp_read_s16(0xAE);
+    s_cal.AC4 = bmp_read_u16(0xB0);
+    s_cal.AC5 = bmp_read_u16(0xB2);
+    s_cal.AC6 = bmp_read_u16(0xB4);
+    s_cal.B1  = bmp_read_s16(0xB6);
+    s_cal.B2  = bmp_read_s16(0xB8);
+    s_cal.MB  = bmp_read_s16(0xBA);
+    s_cal.MC  = bmp_read_s16(0xBC);
+    s_cal.MD  = bmp_read_s16(0xBE);
 
-    /* Calefactor de gas desactivado: solo usamos temp/hum/presion. */
-    s_bme_heatr.enable     = BME68X_DISABLE;
-    s_bme_heatr.heatr_temp = 0;
-    s_bme_heatr.heatr_dur  = 0;
-    bme68x_set_heatr_conf(BME68X_FORCED_MODE, &s_bme_heatr, &s_bme);
-
-    ESP_LOGI(TAG, "BME680 inicializado correctamente");
+    ESP_LOGI(TAG, "BMP180 (GY-68) inicializado correctamente");
     return true;
 }
 
-static void bme680_leer(void)
+/* Lee la temperatura del BMP180 aplicando la formula de compensacion oficial.
+ * El BMP180 no mide humedad, por eso s_hum_pct queda en 0. */
+static void bmp180_leer(void)
 {
     if (!s_bme_ok) return;
 
-    if (bme68x_set_op_mode(BME68X_FORCED_MODE, &s_bme) != BME68X_OK) return;
+    /* 1. Pedir medicion de temperatura: escribir 0x2E en el registro 0xF4. */
+    if (bmp_write8(0xF4, 0x2E) != ESP_OK) return;
+    vTaskDelay(pdMS_TO_TICKS(5));        /* conversion: 4.5 ms */
 
-    uint32_t dur = bme68x_get_meas_dur(BME68X_FORCED_MODE, &s_bme_conf, &s_bme);
-    s_bme.delay_us(dur, s_bme.intf_ptr);
+    int32_t UT = bmp_read_u16(0xF6);     /* temperatura sin compensar */
 
-    struct bme68x_data data;
-    uint8_t n = 0;
-    if (bme68x_get_data(BME68X_FORCED_MODE, &data, &n, &s_bme) == BME68X_OK && n > 0) {
-        s_temp_c  = data.temperature;    /* grados C          */
-        s_hum_pct = data.humidity;       /* % humedad relativa */
-    }
+    /* 2. Formula de compensacion de temperatura (datasheet BMP180). */
+    int32_t X1 = ((UT - (int32_t)s_cal.AC6) * (int32_t)s_cal.AC5) >> 15;
+    int32_t X2 = ((int32_t)s_cal.MC << 11) / (X1 + (int32_t)s_cal.MD);
+    int32_t B5 = X1 + X2;
+    float temp = ((B5 + 8) >> 4) / 10.0f;   /* en grados Celsius */
+
+    s_temp_c  = temp;
+    s_hum_pct = 0.0f;   /* el BMP180 no mide humedad */
 }
 
 /* ============================================================================
@@ -576,7 +580,7 @@ static void tarea_sensor(void *arg)
 
     while (1) {
         s_co_pct = leer_co();
-        bme680_leer();
+        bmp180_leer();
         aplicar_logica_local();
 
         bool cambio    = (co_prev < -999.0f) || (fabsf(s_co_pct - co_prev) >= 2.0f);
@@ -645,12 +649,12 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    /* Hardware local: extractor apagado, ADC del MQ-7 y BME680 por I2C. */
+    /* Hardware local: extractor apagado, ADC del MQ-7 y BMP180 por I2C. */
     rele_init();
     adc_init();
-    s_bme_ok = bme680_init();
+    s_bme_ok = bmp180_init();
     if (!s_bme_ok) {
-        ESP_LOGW(TAG, "Continuando sin BME680 (solo CO por MQ-7)");
+        ESP_LOGW(TAG, "Continuando sin BMP180 (solo CO por MQ-7)");
     }
 
     xTaskCreate(tarea_openthread, "openthread", 8192, NULL, 5, NULL);

@@ -27,7 +27,7 @@ riesgo detectado**, en vez de aplicar una sola respuesta uniforme:
                                    ▼              ▼              ▼              ▼
                               [ Nodo 1 ]     [ Nodo 2 ]     [ Nodo 3 ]      (routers
                               Tren de gas    Horno/Chim.    Pasillo         de respaldo)
-                              MQ-6 + válvula MQ-7+BME680+   MQ-7 + baliza
+                              MQ-6 + válvula MQ-7+BMP180+   MQ-7 + baliza
                                              extractor
 ```
 
@@ -68,7 +68,7 @@ actuadores y lógica.
 - **Acción:** ante fuga, **desenergiza el relé** y el resorte de la válvula NC corta el gas en < 1 s.
 
 ### Nodo 2 — Horno / Chimenea ([firmware](../firmware/nodo2_horno/))
-- **Sensores:** MQ-7 (CO) en GPIO3 + **BME680** (temp/humedad) por I²C (GPIO6/GPIO7).
+- **Sensores:** MQ-7 (CO) en GPIO3 + **BMP180 (GY-68)** (temperatura) por I²C (GPIO6/GPIO7).
 - **Actuador:** relé → extractor en GPIO5.
 - **Recurso:** `/act/extractor`.
 - **Acción:** ante CO alto o sobretemperatura, enciende el extractor (con histéresis).
@@ -108,7 +108,7 @@ conmutaciones erráticas (importante en radio, donde los mensajes se reenvían).
 
 - **Escenario A — Fuga CH₄/GLP (Nodo 1):** cerrar `/act/cutoff` + activar `/act/alarm`. **NO** extractor.
 - **Escenario B — CO alto (Nodo 2/3):** activar `/act/extractor` al 100% + `/act/alarm` si supera el umbral crítico.
-- **Escenario C — Sobretemperatura (BME680 del Nodo 2):** alerta + extracción.
+- **Escenario C — Sobretemperatura (BMP180 del Nodo 2):** alerta + extracción.
 - **Fail-Safe inverso:** sonda caída (`5.03` a 60 s) o nodo muerto (timeout 93 s) → estado seguro.
 
 Ver el detalle de requisitos en [`REQUERIMIENTOS.md`](REQUERIMIENTOS.md) y las pruebas en

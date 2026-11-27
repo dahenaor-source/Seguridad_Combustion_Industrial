@@ -13,7 +13,7 @@ del horno, y ante peligro **enciende la extracción forzada** de aire.
 ## Función
 
 - Mide **CO** con un sensor **MQ-7** (analógico, por ADC).
-- Mide **temperatura, humedad y presión** con un **BME680** por bus **I²C**.
+- Mide **temperatura** (y presión) con un **BMP180 (GY-68)** por bus **I²C**. *No mide humedad.*
 - Publica telemetría por CoAP en `/env/air` (payload **CBOR < 52 bytes**).
 - Expone el recurso de actuación `/act/extractor` (**PUT CON idempotente**).
 - Controla el relé del **ventilador extractor**:
@@ -27,11 +27,11 @@ del horno, y ante peligro **enciende la extracción forzada** de aire.
 | Señal | Pin ESP32-C6 | Notas |
 |-------|-------------|-------|
 | MQ-7 `AO` (CO) | **GPIO3** (ADC1_CH3) | Salida 5 V por divisor **10 kΩ + 15 kΩ** → ≤ 3.0 V para el ADC |
-| BME680 `SDA` | **GPIO6** | Bus I²C, alimentado a **3.3 V** (no 5 V) |
-| BME680 `SCL` | **GPIO7** | Bus I²C, 3.3 V. Dirección I²C `0x76` (SDO a GND) |
+| BMP180 `SDA` | **GPIO6** | Bus I²C, alimentado a **3.3 V** (no 5 V) |
+| BMP180 `SCL` | **GPIO7** | Bus I²C, 3.3 V. Dirección I²C fija `0x77` |
 | Relé `IN` (extractor) | **GPIO5** | Módulo relé, **disparo en LOW** |
 
-Alimentación: 12 VDC regulada a 5 V (MQ-7 y relé) y a 3.3 V (BME680).
+Alimentación: 12 VDC regulada a 5 V (MQ-7 y relé) y a 3.3 V (BMP180).
 
 ---
 
@@ -41,20 +41,20 @@ Alimentación: 12 VDC regulada a 5 V (MQ-7 y relé) y a 3.3 V (BME680).
 |---|-------|-------|-------|-------|
 | 1 | Fuente **+5V** | MQ-7 **VCC** | Rojo | Calefactor interno del MQ-7 |
 | 2 | Fuente **+5V** | Relé **VCC** | Rojo | Módulo relé de 5 V |
-| 3 | ESP32-C6 **3V3** | BME680 **VCC** | Rojo | El BME680 es de **3.3 V** |
-| 4 | GND común | MQ-7 / BME680 / ESP32 / relé / extractor **GND** | Negro | **Tierra común obligatoria** |
+| 3 | ESP32-C6 **3V3** | BMP180 **VIN** | Rojo | El BMP180 (GY-68) es de **3.3 V** |
+| 4 | GND común | MQ-7 / BMP180 / ESP32 / relé / extractor **GND** | Negro | **Tierra común obligatoria** |
 | 5 | MQ-7 **AO** | **R1 (10 kΩ)** → nodo central del divisor | Azul | Señal analógica de CO |
 | 6 | Nodo central del divisor | ESP32-C6 **GPIO3** | Azul | Tensión reducida a ≤ 3.0 V |
 | 7 | **R2 (15 kΩ)** | GND común | Negro | Rama inferior del divisor |
-| 8 | BME680 **SDA** | ESP32-C6 **GPIO6** | Verde | Dato I²C |
-| 9 | BME680 **SCL** | ESP32-C6 **GPIO7** | Verde | Reloj I²C |
+| 8 | BMP180 **SDA** | ESP32-C6 **GPIO6** | Verde | Dato I²C |
+| 9 | BMP180 **SCL** | ESP32-C6 **GPIO7** | Verde | Reloj I²C |
 | 10 | ESP32-C6 **GPIO5** | Relé **IN** | Verde | Control del extractor (LOW = ON) |
 | 11 | Fuente **+12V** | Relé **COM** | Rojo | Alimenta el motor del extractor |
 | 12 | Relé **NA** | Extractor **(+)** | Rojo | Al cerrar el relé, energiza el extractor |
 | 13 | Extractor **(−)** | GND común | Negro | Retorno del extractor |
 
-> ⚠️ El BME680 va a **3.3 V**, no a 5 V. El MQ-7 sí a 5 V (pero su salida pasa por el divisor
-> antes del ADC). Todos los GND deben estar unidos.
+> ⚠️ El BMP180 (GY-68) va a **3.3 V**, no a 5 V. El MQ-7 sí a 5 V (pero su salida pasa por el
+> divisor antes del ADC). Todos los GND deben estar unidos.
 
 ### Divisor de tensión (MQ-7)
 
@@ -69,14 +69,14 @@ Vout = Vin × R2 / (R1 + R2) = 5.0 × 15 / (10 + 15) = 3.0 V
 
 | Recurso | Método | Payload CBOR | Descripción |
 |---------|--------|--------------|-------------|
-| `/env/air` | GET | mapa `{t,c,T,h,x,f}` | Telemetría: tipo, CO 0–100, temperatura, humedad, estado extractor, falla |
+| `/env/air` | GET | mapa `{t,c,T,h,x,f}` | Telemetría: tipo, CO 0–100, temperatura, humedad (siempre 0: el BMP180 no la mide), estado extractor, falla |
 | `/act/extractor` | PUT CON | entero `1`=encender, `0`=apagar | Control del extractor. Idempotente. Apagar se rechaza (4.03) si hay riesgo vigente |
 
 **Telemetría `/env/air` (CBOR):**
 - `t`: tipo de nodo (2 = horno/chimenea)
 - `c`: índice de CO 0–100
-- `T`: temperatura (°C)
-- `h`: humedad relativa (%)
+- `T`: temperatura (°C) — del BMP180
+- `h`: humedad relativa (%) — **siempre 0**, el BMP180 no mide humedad (clave reservada para compatibilidad)
 - `x`: estado extractor (0 off, 1 on)
 - `f`: falla de sonda (0/1)
 
@@ -116,8 +116,8 @@ idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-El driver del BME680 (Bosch, BSD-3-Clause) viene incluido como componente local en
-`components/bme68x/`, así que no requiere descargar dependencias externas aparte de CBOR.
+El BMP180 (GY-68) se maneja con un **driver propio por I²C** escrito en `nodo2_horno.c`
+(sin componentes externos), así que la única dependencia a descargar es CBOR.
 
 ---
 
@@ -135,8 +135,9 @@ El driver del BME680 (Bosch, BSD-3-Clause) viene incluido como componente local 
 ## Notas de puesta en marcha
 
 - **Sin el MQ-7 conectado**, GPIO3 queda flotante y el valor `CO=` del log es solo ruido.
-- **Sin el BME680 conectado**, el nodo sigue funcionando con solo CO; en el log verás
-  `Continuando sin BME680` y `temp=0.0C`.
+- **Sin el BMP180 conectado** (o si no responde), el nodo sigue funcionando con solo CO; en el
+  log verás `Continuando sin BMP180` y `temp=0.0C`. Si responde, verás
+  `BMP180 (GY-68) inicializado correctamente` y `temp=` con el valor real.
 - El MQ-7 requiere precalentamiento antes de dar lecturas estables.
 
 ## Estado de validación
@@ -144,6 +145,6 @@ El driver del BME680 (Bosch, BSD-3-Clause) viene incluido como componente local 
 - [ ] Compila y arranca sin panic.
 - [ ] Radio Thread en Canal 25 + CoAP activo.
 - [ ] Lectura del MQ-7 (CO).
-- [ ] Lectura del BME680 (temp/humedad) por I²C.
+- [ ] Lectura del BMP180 (temperatura) por I²C.
 - [ ] Relé + extractor (encendido/apagado por umbral e histéresis).
 - [ ] Calibración de umbrales a ppm / °C reales.

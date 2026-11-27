@@ -37,4 +37,4 @@ Sistema adaptado a hornos (cerámica/vidrio/metales) y cuartos de calderas a gas
 
 - **Escenario A — Fuga de CH₄/GLP (Nodo 1):** cerrar `/act/cutoff` (desenergizar relé → la válvula NC cierra por resorte), activar `/act/alarm` (Nodo 3). **NO** encender extractor.
 - **Escenario B — CO alto (Nodo 2/3):** activar `/act/extractor` al 100% + `/act/alarm` si el CO supera el umbral crítico.
-- **Escenario C — Sobretemperatura (BME680 del Nodo 2):** alerta preventiva + extracción si supera el umbral térmico.
+- **Escenario C — Sobretemperatura (BMP180 del Nodo 2):** alerta preventiva + extracción si supera el umbral térmico.

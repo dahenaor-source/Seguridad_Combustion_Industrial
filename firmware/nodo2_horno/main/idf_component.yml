@@ -1,6 +1,7 @@
 # Dependencias gestionadas por el IDF Component Manager.
 # El componente "espressif/cbor" (TinyCBOR) expone el header "cbor.h".
-# El driver BME68x de Bosch se incluye como componente local en components/bme68x.
+# El BMP180 (GY-68) se maneja con un driver propio por I2C en nodo2_horno.c
+# (sin componentes externos).
 dependencies:
   idf: ">=5.1"
   espressif/cbor: "^0.6.0"

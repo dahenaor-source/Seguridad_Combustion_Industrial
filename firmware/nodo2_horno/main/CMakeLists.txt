@@ -10,5 +10,4 @@ idf_component_register(
         esp_netif
         esp_event
         vfs
-        bme68x
 )

@@ -31,7 +31,7 @@ atmosféricos son **predecibles** y dependen de la química de la combustión. E
 |------|------|----------|----------|--------------|
 | **Central** | Caseta/tablero | — | 5 LEDs de estado | — |
 | **Nodo 1** | Tren de gas / quemadores | MQ-6 (CH₄/GLP) | Relé → electroválvula NC | `/act/cutoff` |
-| **Nodo 2** | Cuerpo del horno / chimenea | MQ-7 (CO) + BME680 (I²C) | Relé → extractor | `/act/extractor` |
+| **Nodo 2** | Cuerpo del horno / chimenea | MQ-7 (CO) + BMP180 GY-68 (I²C, temp) | Relé → extractor | `/act/extractor` |
 | **Nodo 3** | Pasillo de operarios | MQ-7 (CO) | Buzzer + baliza LED | `/act/alarm` |
 
 Los nodos forman una malla autorrecuperable en **Canal 25 (2475 MHz)** y operan de forma
@@ -44,7 +44,7 @@ autónoma aunque se apague la central.
 ```
 firmware/
   nodo1_tren_gas/     ← Nodo 1: corte de gas (ESP-IDF, ESP32-C6)
-  nodo2_horno/        ← Nodo 2: CO + BME680 + extractor (ESP-IDF, ESP32-C6)
+  nodo2_horno/        ← Nodo 2: CO + BMP180 (temp) + extractor (ESP-IDF, ESP32-C6)
   nodo3_pasillo/      ← Nodo 3: CO + buzzer + baliza LED (ESP-IDF, ESP32-C6)
 docs/
   ARQUITECTURA.md          ← visión general del sistema y los nodos
