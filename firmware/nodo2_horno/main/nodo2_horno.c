@@ -112,9 +112,11 @@ static const char *TAG = "nodo2_horno";
 /* --- Umbrales (se calibran en campo).
  *  co_pct: indice de CO normalizado 0..100.
  *  temp:   grados Celsius del BME680.                                           --- */
-#define UMBRAL_CO_ALERTA        35.0f      /* aviso temprano de CO                */
-#define UMBRAL_CO_EXTRACCION    50.0f      /* enciende extractor al 100%          */
-#define UMBRAL_CO_APAGADO       30.0f      /* histeresis: por debajo, apaga       */
+/* Umbrales calibrados al MQ-7 real del montaje:
+ *   aire limpio ~5% (35 mV), con gas sube hasta ~25% (380 mV).                  */
+#define UMBRAL_CO_ALERTA        15.0f      /* aviso temprano de CO                */
+#define UMBRAL_CO_EXTRACCION    18.0f      /* enciende extractor al 100%          */
+#define UMBRAL_CO_APAGADO       12.0f      /* histeresis: por debajo, apaga       */
 #define UMBRAL_TEMP_ALERTA      60.0f      /* grados C: sobretemperatura          */
 
 /* --- Telemetria --- */
@@ -124,6 +126,12 @@ static const char *TAG = "nodo2_horno";
 
 /* --- Filtro de media movil del MQ-7 --- */
 #define VENTANA_FILTRO          8
+
+/* --- Plausibilidad del ADC (calibrado al MQ-7 real) ---
+ * Un pico de ruido aislado NO marca falla: se exigen FALLA_LECTURAS_MIN seguidas. */
+#define MV_MIN_VALIDO           12         /* reposo del MQ-7 ~35 mV -> valido    */
+#define MV_MAX_VALIDO           3250
+#define FALLA_LECTURAS_MIN      3
 
 /* ============================================================================
  *  ESTADO GLOBAL DEL NODO
@@ -147,6 +155,7 @@ static volatile float  s_hum_pct  = 0.0f;   /* humedad relativa (%)        */
 static volatile bool   s_sensor_falla = false;
 static volatile bool   s_bme_ok   = false;
 static volatile estado_extractor_t s_estado = EXTRACTOR_OFF;
+static int             s_cuenta_implausible = 0;  /* lecturas malas seguidas */
 
 static otCoapResource s_recurso_ext;        /* /act/extractor */
 static otCoapResource s_recurso_env;        /* /env/air       */
@@ -231,17 +240,27 @@ static float leer_co(void)
 {
     int raw = 0;
     if (adc_oneshot_read(s_adc_handle, MQ7_ADC_CHANNEL, &raw) != ESP_OK) {
-        s_sensor_falla = true;
+        s_cuenta_implausible++;
+        if (s_cuenta_implausible >= FALLA_LECTURAS_MIN) s_sensor_falla = true;
         return s_co_pct;
     }
     int mv = raw;
     if (s_adc_cali_ok) adc_cali_raw_to_voltage(s_adc_cali, raw, &mv);
 
-    if (mv < 50 || mv > 3150) {
-        s_sensor_falla = true;
-        ESP_LOGW(TAG, "MQ-7 implausible (%d mV) -> posible sonda desconectada", mv);
-        return s_co_pct;
+    /* Un pico aislado NO marca falla: se exigen FALLA_LECTURAS_MIN seguidas. */
+    if (mv < MV_MIN_VALIDO || mv > MV_MAX_VALIDO) {
+        s_cuenta_implausible++;
+        if (s_cuenta_implausible >= FALLA_LECTURAS_MIN) {
+            if (!s_sensor_falla) {
+                ESP_LOGW(TAG, "MQ-7 implausible (%d mV) x%d -> sonda desconectada",
+                         mv, s_cuenta_implausible);
+            }
+            s_sensor_falla = true;
+        }
+        return s_co_pct;   /* mantener ultimo valor valido */
     }
+
+    s_cuenta_implausible = 0;
     s_sensor_falla = false;
 
     float pct = (mv / 3000.0f) * 100.0f;

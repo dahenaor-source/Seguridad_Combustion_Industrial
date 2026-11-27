@@ -95,11 +95,15 @@ La central decide globalmente, pero el nodo actúa solo si pierde el enlace (RF-
 Umbrales de arranque (se calibran en campo), en `nodo2_horno.c`:
 
 ```c
-#define UMBRAL_CO_ALERTA       35.0f   // aviso temprano
-#define UMBRAL_CO_EXTRACCION   50.0f   // enciende extractor
-#define UMBRAL_CO_APAGADO      30.0f   // histéresis de apagado
+#define UMBRAL_CO_ALERTA       15.0f   // aviso temprano
+#define UMBRAL_CO_EXTRACCION   18.0f   // enciende extractor
+#define UMBRAL_CO_APAGADO      12.0f   // histéresis de apagado
 #define UMBRAL_TEMP_ALERTA     60.0f   // °C: sobretemperatura
 ```
+
+> Valores calibrados en banco para el MQ-7 usado: en aire limpio lee ~5% (35 mV)
+> y con gas sube hasta ~25% (380 mV). El límite inferior de plausibilidad se bajó
+> a 12 mV y un pico aislado ya no marca falla (se exigen 3 lecturas seguidas).
 
 ---
 
